@@ -7,6 +7,7 @@ Creates 10 or 50 SEO-optimized pages in Duda via Dynamic Content Manager
 import json
 import os
 import logging
+import time
 from datetime import datetime
 from typing import Dict, List
 
@@ -118,22 +119,50 @@ class HubSpotDudaIntegration:
             base_city = f"{city}, {state}" if city and state else ""
             
             # Determine number of pages based on deal type
-            # 10 pages: "Starter Plus $59" or anything with "10 Landing Pages"
-            # 50 pages: "Starter Plus Power Pages" or "ZING Power Pages / $279" or anything with "Power Pages"
+            # Priority order matters - check most specific patterns first
+            # 100 pages: Dominate tier
+            # 50 pages: Boost tier, "50 Local Landing Pages" packages, "Power Pages" packages
+            # 10 pages: Discover tier, "10 Landing Pages" packages, "Add on Landing Pages"
             num_pages = 10  # Default
             if deal_type:
                 deal_type_lower = str(deal_type).lower()
                 logger.info(f"Evaluating deal type: '{deal_type}'")
-                
-                if 'power pages' in deal_type_lower:
+
+                # 100 pages: Dominate tier
+                if 'dominate' in deal_type_lower:
+                    num_pages = 100
+                    logger.info(f"Deal type contains 'dominate' - setting to 100 pages")
+
+                # 50 pages: Boost tier
+                elif 'boost' in deal_type_lower:
                     num_pages = 50
-                    logger.info(f"Deal type contains 'Power Pages' - setting to 50 pages")
+                    logger.info(f"Deal type contains 'boost' - setting to 50 pages")
+
+                # 50 pages: 50 Local Landing Pages packages
+                elif '50 local landing pages' in deal_type_lower:
+                    num_pages = 50
+                    logger.info(f"Deal type contains '50 local landing pages' - setting to 50 pages")
+
+                # 50 pages: Power Pages packages (Starter Plus Power Pages, ZING Power Pages, Discover/Power Pages, etc.)
+                elif 'power pages' in deal_type_lower:
+                    num_pages = 50
+                    logger.info(f"Deal type contains 'power pages' - setting to 50 pages")
+
+                # 10 pages: Discover tier (checked after power pages since "Discover/Power Pages" should be 50)
+                elif 'discover' in deal_type_lower:
+                    num_pages = 10
+                    logger.info(f"Deal type contains 'discover' - setting to 10 pages")
+
+                # 10 pages: 10 Landing Pages packages
                 elif '10 landing pages' in deal_type_lower:
                     num_pages = 10
-                    logger.info(f"Deal type contains '10 Landing Pages' - setting to 10 pages")
-                elif 'starter plus $59' in deal_type_lower:
+                    logger.info(f"Deal type contains '10 landing pages' - setting to 10 pages")
+
+                # 10 pages: Add on Landing Pages
+                elif 'add on landing pages' in deal_type_lower:
                     num_pages = 10
-                    logger.info(f"Deal type is 'Starter Plus $59' - setting to 10 pages")
+                    logger.info(f"Deal type contains 'add on landing pages' - setting to 10 pages")
+
                 else:
                     logger.info(f"Deal type '{deal_type}' doesn't match known patterns, defaulting to 10 pages")
             else:
@@ -222,40 +251,43 @@ class HubSpotDudaIntegration:
                      company_name: str, contact_id: str) -> List[Dict]:
         """
         Create Dynamic Content Manager rows for each location
-        
+
         Args:
             duda_site_code: Unique Duda site identifier
             industry: Industry type
             locations: List of locations
             company_name: Company name for context
             contact_id: HubSpot contact ID for tracking
-            
+
         Returns:
             List of created content row information
         """
         created_pages = []
-        
+        failed_batches = []
+        batch_size = self.config.DUDA_BATCH_SIZE
+
         try:
             logger.info(f"Creating Dynamic Content Manager rows for {len(locations)} locations")
-            
-            # Build payload with all rows in one API call
+            logger.info(f"Using batch size of {batch_size} rows per API call")
+
+            # Build all rows first
             rows = []
-            
+
             for i, location in enumerate(locations):
                 # Create page URL slug - remove commas and special characters
                 clean_location = location.lower().replace(', ', '-').replace(',', '').replace(' ', '-')
                 page_url = f"best-{industry.lower().replace(' ', '-')}-{clean_location}"
                 page_title = f"Best {industry} in {location}"
-                
+
                 # Generate content
-                logger.info(f"Generating content for location {i+1}: {location}")
+                logger.info(f"Generating content for location {i+1}/{len(locations)}: {location}")
                 content = self.content_gen.generate_content(
                     service=industry,
                     location=location,
                     company_name=company_name,
                     keywords=[industry.lower(), location.lower()]
                 )
-                
+
                 # Build row for this location
                 row = {
                     "page_item_url": page_url,
@@ -266,31 +298,64 @@ class HubSpotDudaIntegration:
                 }
                 rows.append(row)
                 logger.info(f"Row {i+1} built for {page_url}")
-            
-            # Send all rows in one API call
-            logger.info(f"Sending {len(rows)} rows to Dynamic Content Manager")
-            result = self.duda.create_dcm_rows(
-                site_name=duda_site_code,
-                collection_name="Location",
-                rows=rows
-            )
-            
-            logger.info(f"Dynamic Content Manager response: {json.dumps(result)}")
-            
-            # Build response with created pages
-            for i, row in enumerate(rows):
-                created_pages.append({
-                    'url': row['page_item_url'],
-                    'heading': row['data']['Location Name'],
-                    'description_preview': row['data']['Location Description'][:100]
-                })
-            
-            logger.info(f"Successfully created {len(created_pages)} Dynamic Content rows")
-            
+
+            # Send rows in batches to avoid payload limits
+            total_batches = (len(rows) + batch_size - 1) // batch_size
+            logger.info(f"Sending {len(rows)} rows in {total_batches} batches")
+
+            for batch_num in range(total_batches):
+                start_idx = batch_num * batch_size
+                end_idx = min(start_idx + batch_size, len(rows))
+                batch_rows = rows[start_idx:end_idx]
+
+                logger.info(f"Sending batch {batch_num + 1}/{total_batches} (rows {start_idx + 1}-{end_idx})")
+
+                try:
+                    result = self.duda.create_dcm_rows(
+                        site_name=duda_site_code,
+                        collection_name="Location",
+                        rows=batch_rows
+                    )
+
+                    logger.info(f"Batch {batch_num + 1} response: {json.dumps(result)}")
+
+                    # Track successfully created pages from this batch
+                    for row in batch_rows:
+                        created_pages.append({
+                            'url': row['page_item_url'],
+                            'heading': row['data']['Location Name'],
+                            'description_preview': row['data']['Location Description'][:100]
+                        })
+
+                    logger.info(f"Batch {batch_num + 1} completed: {len(batch_rows)} rows created")
+
+                except Exception as batch_error:
+                    logger.error(f"Batch {batch_num + 1} failed: {str(batch_error)}")
+                    failed_batches.append({
+                        'batch_num': batch_num + 1,
+                        'start_idx': start_idx,
+                        'end_idx': end_idx,
+                        'error': str(batch_error),
+                        'rows': [r['page_item_url'] for r in batch_rows]
+                    })
+
+                # Add delay between batches to avoid rate limiting
+                if batch_num < total_batches - 1:
+                    delay = self.config.API_CALL_DELAY
+                    logger.info(f"Waiting {delay}s before next batch...")
+                    time.sleep(delay)
+
+            # Summary
+            if failed_batches:
+                logger.warning(f"Completed with errors: {len(created_pages)} pages created, {len(failed_batches)} batches failed")
+                logger.warning(f"Failed batches: {json.dumps(failed_batches)}")
+            else:
+                logger.info(f"Successfully created all {len(created_pages)} Dynamic Content rows")
+
         except Exception as e:
             logger.error(f"Failed to create DCM rows: {str(e)}")
             raise
-        
+
         return created_pages
 
 

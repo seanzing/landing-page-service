@@ -28,71 +28,164 @@ class ContentGenerator:
         self.model = model
         openai.api_key = api_key
     
-    def generate_locations(self, base_city: str, num_locations: int, 
+    def generate_locations(self, base_city: str, num_locations: int,
                           service_type: str = "") -> List[str]:
         """
-        Generate a list of nearby locations for a given city (within 60 mile radius)
-        
+        Generate a list of unique nearby locations for a given city
+
         Args:
             base_city: The city to generate locations around (e.g., "Denver, CO")
-            num_locations: Number of locations to generate (10 or 50)
+            num_locations: Number of locations to generate (10, 50, or 100)
             service_type: Optional service type for context (e.g., "electrician")
-            
+
         Returns:
-            List of location names within 60 miles of base_city
+            List of unique location names near base_city
         """
         try:
-            logger.info(f"Generating {num_locations} locations within 60 miles of {base_city}")
-            
-            prompt = f"""Generate a list of exactly {num_locations} nearby cities, towns, and neighborhoods around {base_city}.
+            logger.info(f"Generating {num_locations} unique locations near {base_city}")
 
-CRITICAL CONSTRAINT: ALL locations must be within a 60 mile radius of {base_city}. Do NOT include locations further than 60 miles away.
-            
-Requirements:
-- Return ONLY a valid JSON array of location names
-- Each location MUST be a real place within 60 miles of {base_city}
-- Include nearby cities, suburbs, and neighborhoods
-- Prioritize closer locations first (within 30 miles when possible)
-- Format: ["Location 1", "Location 2", ...]
-- Do NOT include {base_city} itself
-- Include the state/region (e.g., "Boulder, CO" not just "Boulder")
-- No explanations, markdown, or extra text - just the JSON array
-- VERIFY: Every location must be within 60 miles of {base_city}
+            # Request extra locations to account for potential duplicates
+            request_count = min(num_locations + 20, num_locations * 2)
 
-Example format for {base_city}:
-["Aurora, CO", "Boulder, CO", "Broomfield, CO", "Castle Rock, CO", "Colorado Springs, CO"]"""
+            prompt = f"""Generate a list of exactly {request_count} UNIQUE nearby locations around {base_city}.
+
+CRITICAL REQUIREMENTS:
+1. EVERY location must be UNIQUE - no duplicates allowed
+2. Each location must be a real, verifiable place
+3. Include the state abbreviation (e.g., "Boulder, CO" not just "Boulder")
+4. Do NOT include {base_city} itself
+
+LOCATION PRIORITY (use this order to fill the list):
+1. First: Cities and towns within 30 miles of {base_city}
+2. Then: Suburbs and unincorporated communities within 45 miles
+3. Then: Neighborhoods and districts within {base_city} metro area (e.g., "Westside San Antonio, TX", "North Austin, TX")
+4. Then: Cities and towns within 60 miles
+5. If still needed: Extend to 75 miles to ensure {request_count} unique locations
+
+For rural areas with few nearby cities, include:
+- Named neighborhoods (e.g., "Downtown {base_city.split(',')[0]}")
+- Nearby unincorporated communities
+- Census-designated places (CDPs)
+- Well-known subdivisions or areas
+
+FORMAT: Return ONLY a valid JSON array, no explanations:
+["City1, ST", "City2, ST", "Neighborhood Name, ST", ...]
+
+VERIFY before responding:
+- All {request_count} locations are UNIQUE
+- No location appears twice
+- All locations are real places"""
 
             response = openai.ChatCompletion.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that generates lists of nearby cities and towns. You MUST enforce the 60 mile radius constraint strictly. Do not include locations outside the radius."},
+                    {"role": "system", "content": "You are a geographic expert that generates comprehensive lists of unique locations. You have extensive knowledge of cities, towns, neighborhoods, suburbs, and communities across the United States. You NEVER return duplicate locations."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
-                max_tokens=2000
+                temperature=0.5,  # Lower temperature for more consistent results
+                max_tokens=4000   # More tokens for larger lists
             )
-            
+
             locations_text = response.choices[0].message.content.strip()
-            logger.info(f"Raw LLM response: {locations_text[:200]}")
-            
+            logger.info(f"Raw LLM response: {locations_text[:300]}")
+
             # Parse JSON response
             try:
                 locations = json.loads(locations_text)
                 if not isinstance(locations, list):
                     raise ValueError("Response is not a list")
-                
-                # Ensure we have exactly the right number
-                locations = locations[:num_locations]
-                logger.info(f"Generated {len(locations)} locations within 60 miles of {base_city}: {locations[:3]}...")
-                return locations
-                
+
+                # Deduplicate while preserving order
+                seen = set()
+                unique_locations = []
+                for loc in locations:
+                    loc_normalized = loc.strip().lower()
+                    if loc_normalized not in seen and loc.strip():
+                        seen.add(loc_normalized)
+                        unique_locations.append(loc.strip())
+
+                logger.info(f"After deduplication: {len(unique_locations)} unique locations")
+
+                # If we don't have enough, try to generate more
+                if len(unique_locations) < num_locations:
+                    logger.warning(f"Only got {len(unique_locations)} unique locations, need {num_locations}. Attempting to generate more...")
+                    additional = self._generate_additional_locations(
+                        base_city,
+                        num_locations - len(unique_locations),
+                        unique_locations
+                    )
+                    unique_locations.extend(additional)
+
+                # Trim to exact count needed
+                final_locations = unique_locations[:num_locations]
+                logger.info(f"Final location count: {len(final_locations)}")
+                logger.info(f"Sample locations: {final_locations[:5]}...")
+
+                return final_locations
+
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse JSON response: {locations_text}")
                 raise ValueError(f"Failed to parse location list: {str(e)}")
-            
+
         except Exception as e:
             logger.error(f"Failed to generate locations: {str(e)}")
             raise
+
+    def _generate_additional_locations(self, base_city: str, needed: int,
+                                       existing: List[str]) -> List[str]:
+        """
+        Generate additional unique locations when initial generation falls short
+
+        Args:
+            base_city: The base city
+            needed: Number of additional locations needed
+            existing: List of already generated locations to avoid duplicates
+
+        Returns:
+            List of additional unique locations
+        """
+        try:
+            existing_str = ", ".join(existing[:20])  # Show some existing to avoid
+
+            prompt = f"""I need {needed} MORE unique locations near {base_city}.
+
+ALREADY HAVE (do NOT repeat these): {existing_str}
+
+Generate {needed} DIFFERENT locations I don't have yet. Include:
+- Neighborhoods within cities (e.g., "Midtown Atlanta, GA")
+- Small communities and CDPs
+- Extend radius up to 100 miles if needed
+
+Return ONLY a JSON array: ["Location1, ST", "Location2, ST", ...]"""
+
+            response = openai.ChatCompletion.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "Generate unique locations not in the existing list."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.6,
+                max_tokens=2000
+            )
+
+            locations_text = response.choices[0].message.content.strip()
+            locations = json.loads(locations_text)
+
+            # Deduplicate against existing
+            existing_normalized = {loc.strip().lower() for loc in existing}
+            additional = []
+            for loc in locations:
+                loc_normalized = loc.strip().lower()
+                if loc_normalized not in existing_normalized and loc.strip():
+                    existing_normalized.add(loc_normalized)
+                    additional.append(loc.strip())
+
+            logger.info(f"Generated {len(additional)} additional unique locations")
+            return additional[:needed]
+
+        except Exception as e:
+            logger.error(f"Failed to generate additional locations: {str(e)}")
+            return []
     
     def generate_content(self, service: str, location: str, 
                         company_name: Optional[str] = None,

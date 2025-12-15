@@ -49,6 +49,9 @@ class Config:
         self.API_CALL_DELAY = float(os.environ.get('API_CALL_DELAY', 0.5))
         self.MAX_RETRIES = int(os.environ.get('MAX_RETRIES', 3))
         self.RETRY_DELAY = float(os.environ.get('RETRY_DELAY', 1.0))
+
+        # Duda API Batching - send rows in chunks to avoid payload limits
+        self.DUDA_BATCH_SIZE = int(os.environ.get('DUDA_BATCH_SIZE', 10))
     
     def validate(self) -> bool:
         """
