@@ -122,8 +122,8 @@ zip -r ../lambda-deployment.zip .
 Set these in Lambda's Configuration > Environment variables:
 ```
 HUBSPOT_API_KEY=pat-na1-...
-DUDA_API_USER=d1d75d21
-DUDA_API_PASS=6nydYJflaCGX
+DUDA_API_USER=
+DUDA_API_PASS=
 OPENAI_API_KEY=sk-proj-...
 CONTENT_LENGTH=3-4 sentences
 CONTENT_TONE=professional
