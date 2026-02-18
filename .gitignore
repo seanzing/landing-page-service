@@ -51,3 +51,8 @@ logs/
 # Deployment
 lambda-deployment.zip
 lambda-deployment/
+package/
+
+# One-off scripts (keep template only)
+scripts/oneoff_*.py
+!scripts/oneoff_template.py

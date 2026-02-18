@@ -125,7 +125,7 @@ pytest --cov=lambda tests/   # Coverage report
 
 ### Local Testing
 ```bash
-python scripts/local_test.py
+python3 scripts/local_test.py
 ```
 
 ### To Lambda
@@ -213,7 +213,48 @@ Claude can read the full project context and make informed suggestions!
 - Never commit `.env` file
 - Update `requirements.txt` when adding packages
 
+## Creating One-Off Scripts
+
+One-off scripts manually generate landing pages for a specific Duda site without going through the HubSpot webhook flow.
+
+### Template Location
+`scripts/oneoff_template.py` - Copy this to create new one-offs.
+
+### Creating a New One-Off
+
+When user provides: site code, industry, base location, and page count:
+
+1. Create new file: `scripts/oneoff_<location>_<industry>.py`
+2. Fill in the configuration section:
+   - `SITE_CODE` - Duda site code (e.g., "27b9d26e")
+   - `INDUSTRY` - Business type (e.g., "Residential Handyman Services")
+   - `BASE_LOCATION` - City, State format with full state name (e.g., "Castle Rock, Colorado")
+   - `NUM_PAGES` - Number of pages (typically 50)
+   - `LOCATIONS` - Leave empty for auto-generation
+
+### Example Request & Response
+
+**User says:** "Need a new one: af78d63e They are an ice cream and frozen yogurt bar in Castle Rock, CO needing 50 pages"
+
+**Create:** `scripts/oneoff_castle_rock_froyo.py` with:
+```python
+SITE_CODE = "af78d63e"
+INDUSTRY = "Ice Cream and Frozen Yogurt Bar"
+BASE_LOCATION = "Castle Rock, Colorado"
+NUM_PAGES = 50
+LOCATIONS = []
+```
+
+### Running One-Offs
+```bash
+python3 scripts/oneoff_castle_rock_froyo.py
+```
+
+### Two Modes
+1. **Auto-generated locations** (default): Set `BASE_LOCATION` and `NUM_PAGES`, leave `LOCATIONS` empty
+2. **Manual locations**: Populate `LOCATIONS` list, leave `BASE_LOCATION` empty
+
 ---
 
-**Last Updated**: December 2025  
+**Last Updated**: January 2026
 **Current Version**: Fully functional with multi-deal support and openai 0.27.8

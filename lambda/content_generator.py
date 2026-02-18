@@ -89,6 +89,15 @@ VERIFY before responding:
             locations_text = response.choices[0].message.content.strip()
             logger.info(f"Raw LLM response: {locations_text[:300]}")
 
+            # Strip markdown code fences if present
+            if locations_text.startswith("```"):
+                # Remove opening fence (```json or ```)
+                locations_text = re.sub(r'^```(?:json)?\s*\n?', '', locations_text)
+                # Remove closing fence
+                locations_text = re.sub(r'\n?```\s*$', '', locations_text)
+                locations_text = locations_text.strip()
+                logger.info(f"Stripped markdown fences, cleaned text: {locations_text[:100]}...")
+
             # Parse JSON response
             try:
                 locations = json.loads(locations_text)
