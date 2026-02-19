@@ -28,8 +28,51 @@ class ContentGenerator:
         self.model = model
         openai.api_key = api_key
     
+    @staticmethod
+    def _normalize_location(loc: str) -> str:
+        """
+        Normalize a location string to "City Name, ST" format.
+
+        Handles common formats:
+            "denver co"       -> "Denver, CO"
+            "denver, co"      -> "Denver, CO"
+            "  boulder, co  " -> "Boulder, CO"
+            "castle rock, colorado" -> "Castle Rock, Colorado"
+
+        Args:
+            loc: Raw location string
+
+        Returns:
+            Normalized location string
+        """
+        loc = loc.strip()
+        if not loc:
+            return loc
+
+        # Split on comma if present, otherwise split on last whitespace token
+        if "," in loc:
+            parts = [p.strip() for p in loc.split(",", 1)]
+        else:
+            tokens = loc.rsplit(None, 1)
+            if len(tokens) == 2:
+                parts = tokens
+            else:
+                return loc.title()
+
+        city = parts[0].title()
+        state = parts[1]
+
+        # Uppercase state if it looks like an abbreviation (1-2 chars)
+        if len(state) <= 2:
+            state = state.upper()
+        else:
+            state = state.title()
+
+        return f"{city}, {state}"
+
     def generate_locations(self, base_city: str, num_locations: int,
-                          service_type: str = "") -> List[str]:
+                          service_type: str = "",
+                          priority_locations: Optional[List[str]] = None) -> List[str]:
         """
         Generate a list of unique nearby locations for a given city
 
@@ -37,15 +80,47 @@ class ContentGenerator:
             base_city: The city to generate locations around (e.g., "Denver, CO")
             num_locations: Number of locations to generate (10, 50, or 100)
             service_type: Optional service type for context (e.g., "electrician")
+            priority_locations: Optional list of must-include locations that appear
+                first in the result. Remaining slots are filled with auto-generated
+                locations.
 
         Returns:
             List of unique location names near base_city
         """
+        # Normalize and deduplicate priority locations
+        if priority_locations:
+            seen = set()
+            normalized_priorities = []
+            for loc in priority_locations:
+                norm = self._normalize_location(loc)
+                if norm.lower() not in seen and norm:
+                    seen.add(norm.lower())
+                    normalized_priorities.append(norm)
+            priority_locations = normalized_priorities
+        else:
+            priority_locations = []
+
+        # If priority locations already fill the request, return early
+        if len(priority_locations) >= num_locations:
+            logger.info(
+                f"Priority locations ({len(priority_locations)}) fill all "
+                f"{num_locations} slots — skipping GPT location generation"
+            )
+            return priority_locations[:num_locations]
+
+        remaining = num_locations - len(priority_locations)
+
         try:
-            logger.info(f"Generating {num_locations} unique locations near {base_city}")
+            logger.info(f"Generating {remaining} locations near {base_city}"
+                        f" (+ {len(priority_locations)} priority)")
 
             # Request extra locations to account for potential duplicates
-            request_count = min(num_locations + 20, num_locations * 2)
+            request_count = min(remaining + 20, remaining * 2)
+
+            exclude_block = ""
+            if priority_locations:
+                exclude_list = ", ".join(priority_locations)
+                exclude_block = f"\n5. Do NOT include any of these already-selected locations: {exclude_list}"
 
             prompt = f"""Generate a list of exactly {request_count} UNIQUE nearby locations around {base_city}.
 
@@ -53,7 +128,7 @@ CRITICAL REQUIREMENTS:
 1. EVERY location must be UNIQUE - no duplicates allowed
 2. Each location must be a real, verifiable place
 3. Include the state abbreviation (e.g., "Boulder, CO" not just "Boulder")
-4. Do NOT include {base_city} itself
+4. Do NOT include {base_city} itself{exclude_block}
 
 LOCATION PRIORITY (use this order to fill the list):
 1. First: Cities and towns within 30 miles of {base_city}
@@ -104,8 +179,9 @@ VERIFY before responding:
                 if not isinstance(locations, list):
                     raise ValueError("Response is not a list")
 
-                # Deduplicate while preserving order
-                seen = set()
+                # Deduplicate while preserving order, also excluding priority locations
+                priority_normalized = {p.lower() for p in priority_locations}
+                seen = set(priority_normalized)
                 unique_locations = []
                 for loc in locations:
                     loc_normalized = loc.strip().lower()
@@ -113,21 +189,25 @@ VERIFY before responding:
                         seen.add(loc_normalized)
                         unique_locations.append(loc.strip())
 
-                logger.info(f"After deduplication: {len(unique_locations)} unique locations")
+                logger.info(f"After deduplication: {len(unique_locations)} generated locations")
 
                 # If we don't have enough, try to generate more
-                if len(unique_locations) < num_locations:
-                    logger.warning(f"Only got {len(unique_locations)} unique locations, need {num_locations}. Attempting to generate more...")
+                all_so_far = priority_locations + unique_locations
+                if len(unique_locations) < remaining:
+                    logger.warning(f"Only got {len(unique_locations)} unique locations, need {remaining}. Attempting to generate more...")
                     additional = self._generate_additional_locations(
                         base_city,
-                        num_locations - len(unique_locations),
-                        unique_locations
+                        remaining - len(unique_locations),
+                        all_so_far
                     )
                     unique_locations.extend(additional)
 
-                # Trim to exact count needed
-                final_locations = unique_locations[:num_locations]
-                logger.info(f"Final location count: {len(final_locations)}")
+                # Combine: priority first, then generated, trim to exact count
+                final_locations = priority_locations + unique_locations
+                final_locations = final_locations[:num_locations]
+                logger.info(f"Final location count: {len(final_locations)} "
+                            f"({len(priority_locations)} priority + "
+                            f"{len(final_locations) - len(priority_locations)} generated)")
                 logger.info(f"Sample locations: {final_locations[:5]}...")
 
                 return final_locations

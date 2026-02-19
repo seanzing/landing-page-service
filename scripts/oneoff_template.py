@@ -62,6 +62,14 @@ LOCATIONS = [
     # "Marietta, Georgia",
 ]
 
+# Option 3: Hybrid — priority locations placed first, remaining auto-generated
+# Set BASE_LOCATION above AND add priority locations here.
+# These appear first in the final list; the rest are filled by GPT.
+PRIORITY_LOCATIONS = [
+    # "Denver, CO",
+    # "Boulder, CO",
+]
+
 # =============================================================================
 # END CONFIGURATION
 # =============================================================================
@@ -100,6 +108,10 @@ def main():
     else:
         print(f"Base Location: {BASE_LOCATION}")
         print(f"Pages to Create: {NUM_PAGES}")
+        if PRIORITY_LOCATIONS:
+            print(f"Priority Locations: {len(PRIORITY_LOCATIONS)}")
+            for i, loc in enumerate(PRIORITY_LOCATIONS, 1):
+                print(f"  {i}. {loc}")
     print("=" * 60)
 
     # Initialize config
@@ -119,12 +131,14 @@ def main():
         for i, loc in enumerate(locations, 1):
             print(f"  {i}. {loc}")
     else:
+        priority = PRIORITY_LOCATIONS if PRIORITY_LOCATIONS else None
         print(f"\n[1/4] Generating {NUM_PAGES} locations near {BASE_LOCATION}...")
         try:
             locations = content_gen.generate_locations(
                 base_city=BASE_LOCATION,
                 num_locations=NUM_PAGES,
-                service_type=INDUSTRY
+                service_type=INDUSTRY,
+                priority_locations=priority,
             )
             print(f"      Generated {len(locations)} unique locations")
             for i, loc in enumerate(locations[:5], 1):

@@ -49,6 +49,7 @@ class OneOffRequest(BaseModel):
     base_location: str
     num_pages: int = 50
     collection_name: str = "Location"
+    priority_locations: list[str] = []
 
 
 # --- Health check ---
@@ -111,6 +112,13 @@ def generate_pages(req: OneOffRequest):
     content_gen = ContentGenerator(config.OPENAI_API_KEY, config.OPENAI_MODEL)
     duda = DudaClient(config.DUDA_API_USER, config.DUDA_API_PASS)
 
+    # Validate priority locations count
+    if req.priority_locations and len(req.priority_locations) > req.num_pages:
+        raise HTTPException(
+            status_code=400,
+            detail=f"priority_locations ({len(req.priority_locations)}) exceeds num_pages ({req.num_pages})",
+        )
+
     # Generate locations
     logger.info(f"Generating {req.num_pages} locations near {req.base_location}")
     try:
@@ -118,6 +126,7 @@ def generate_pages(req: OneOffRequest):
             base_city=req.base_location,
             num_locations=req.num_pages,
             service_type=req.industry,
+            priority_locations=req.priority_locations or None,
         )
     except Exception as e:
         logger.error(f"Location generation failed: {e}")
