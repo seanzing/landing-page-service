@@ -174,12 +174,6 @@ def generate_pages(req: OneOffRequest):
             raise HTTPException(status_code=500, detail=f"Duda batch {batch_num + 1} failed: {e}")
         time.sleep(1)
 
-    # Publish
-    try:
-        duda.publish_site(req.site_code)
-    except Exception as e:
-        logger.warning(f"Publish failed (may need manual publish): {e}")
-
     return {
         "status": "success",
         "pages_created": len(rows),

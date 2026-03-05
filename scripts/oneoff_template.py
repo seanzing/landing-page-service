@@ -207,15 +207,6 @@ def main():
         print(f"ERROR creating DCM rows: {e}")
         return False
 
-    # Publish site
-    print(f"\n[{3 + step_offset}/{total_steps}] Publishing site {SITE_CODE}...")
-    try:
-        duda.publish_site(SITE_CODE)
-        print(f"      Site published successfully")
-    except Exception as e:
-        print(f"WARNING: Failed to publish site: {e}")
-        print("      You may need to publish manually in Duda")
-
     print("\n" + "=" * 60)
     print("COMPLETE!")
     print(f"Created {len(rows)} landing pages for {INDUSTRY}")
