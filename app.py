@@ -142,8 +142,11 @@ def generate_pages(req: OneOffRequest):
                 tone=config.CONTENT_TONE,
                 length=config.CONTENT_LENGTH,
             )
-            slug = location.lower().replace(", ", "-").replace(" ", "-")
-            slug = "".join(c for c in slug if c.isalnum() or c == "-")
+            service_slug = req.industry.lower().replace(" ", "-")
+            service_slug = "".join(c for c in service_slug if c.isalnum() or c == "-")
+            location_slug = location.lower().replace(", ", "-").replace(" ", "-")
+            location_slug = "".join(c for c in location_slug if c.isalnum() or c == "-")
+            slug = f"best-{service_slug}-{location_slug}"
             slug = "-".join(filter(None, slug.split("-")))
 
             rows.append({
