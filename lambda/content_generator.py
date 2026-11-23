@@ -158,7 +158,7 @@ VERIFY before responding:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.5,  # Lower temperature for more consistent results
-                max_tokens=4000   # More tokens for larger lists
+                max_completion_tokens=4000   # More tokens for larger lists
             )
 
             locations_text = response.choices[0].message.content.strip()
@@ -254,7 +254,7 @@ Return ONLY a JSON array: ["Location1, ST", "Location2, ST", ...]"""
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.6,
-                max_tokens=2000
+                max_completion_tokens=2000
             )
 
             locations_text = response.choices[0].message.content.strip()
@@ -314,7 +314,7 @@ Return ONLY a JSON array: ["Location1, ST", "Location2, ST", ...]"""
                         "content": prompt
                     }
                 ],
-                max_tokens=150,
+                max_completion_tokens=150,
                 temperature=0.7,
                 n=1
             )
